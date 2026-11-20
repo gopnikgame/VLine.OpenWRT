@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>VPN Routing — демо интерфейса OpenWrt</title>
+<link rel="icon" href="data:,">
 <style>
 :root{color-scheme:dark;background:#080d17;color:#f8fafc;font-family:Inter,system-ui,sans-serif}
 body{margin:0;padding:clamp(8px,3vw,28px)}
@@ -53,7 +54,13 @@ function connection() {
     : {state:'disconnected',hasSubscription,canConnect:capture !== null,...(capture ? {} : {runtimeReason:'capture_not_configured'})};
 }
 function settings() {
-  return jsonResponse({ok:true,editable:!connected,networks,capture,routing,hwid:'00000000000000000000000000000001'});
+  const rules = JSON.parse(settingsCandidate).routing.rules.map(rule => ({
+    tag:rule.outboundTag,kind:rule.domain ? 'domain' : 'ip',values:rule.domain || rule.ip,
+  }));
+  const counts = {proxy:0,direct:0,block:0};
+  for (const rule of rules) counts[rule.tag] += rule.values.length;
+  const routingStatus = {state:connected ? routing ? 'applied' : 'default' : 'inactive',...(routing ? {rules,counts} : {})};
+  return jsonResponse({ok:true,editable:!connected,networks,capture,routing,routingStatus,hwid:'00000000000000000000000000000001'});
 }
 globalThis.fetch = async (url, options) => {
   if (options?.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -88,19 +95,22 @@ globalThis.fetch = async (url, options) => {
     }
     if (input.get('source') === 'none') {
       routing = null;
+      if (demoList) { delete demoList.routingSource; demoList.hasManualRouting = false; }
       return settings();
     }
   }
   if (action === 'subscription') {
     if (input.get('url') !== demoUrl)
       return jsonResponse({ok:false,error:'invalid_request'},400);
-    demoList = {snapshot:'demo-list-' + ++snapshotVersion,servers:demoServers};
+    demoList = {snapshot:'demo-list-' + ++snapshotVersion,servers:demoServers,routingSources:['happ','incy'],
+      routingSource:demoList?.routingSource,hasManualRouting:!!routing && !routing.fromSubscription};
     return jsonResponse({ok:true,...demoList});
   }
   if (action === 'remove_subscription') {
     if (connected)
       return jsonResponse({ok:false,error:'subscription_busy'},409);
     demoList = null;
+    if (routing?.fromSubscription) routing = null;
     return jsonResponse({ok:true,...connection()});
   }
   if (action === 'connect' || action === 'probe' || action === 'disconnect') {
@@ -120,6 +130,14 @@ globalThis.fetch = async (url, options) => {
       return jsonResponse({ok:false,error:'capture_not_configured'},503);
     if (server.id === 'lab-c')
       return jsonResponse({ok:false,error:'apply_failed'},503);
+    const source = input.get('routingSource') || demoList.routingSource;
+    if (!source && !demoList.hasManualRouting)
+      return jsonResponse({ok:false,error:'routing_choice_required'},409);
+    if (source) {
+      routing = source === 'none' ? null : {source,fromSubscription:true};
+      demoList.routingSource = source;
+      demoList.hasManualRouting = false;
+    }
     connected = server;
     return jsonResponse({ok:true,...connection()});
   }
@@ -136,6 +154,7 @@ globalThis.fetch = async (url, options) => {
       if (validPolicy && JSON.stringify(profile) === JSON.stringify(settingsFixture)) {
         if (action === 'save_routing') {
           routing = {source};
+          if (demoList) { delete demoList.routingSource; demoList.hasManualRouting = true; }
           return settings();
         }
         return jsonResponse({ok:true,candidate:settingsCandidate.replaceAll('"lab-tproxy"',JSON.stringify(policy.inboundTag))});

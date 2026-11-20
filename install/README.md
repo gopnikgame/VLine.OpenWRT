@@ -16,7 +16,7 @@
 
 ```sh
 python3 luci/build-ipk.py /path/to/artifacts
-python3 install/build-bundle.py /path/to/artifacts/luci-app-vpn-routing_0.3.11-2_all.ipk vpn-routing-bundle --arch x86_64
+python3 install/build-bundle.py /path/to/artifacts/luci-app-vpn-routing_0.3.12-1_all.ipk vpn-routing-bundle --arch x86_64
 ```
 
 Сборщик сверяет хеши архивов Xray 26.10.31 и скриптов TPROXY Manager из ревизии `10b4cb8`. Пассивный пакет устанавливает только двоичный файл, два скрипта, данные геомаршрутизации и лицензии. Для офлайн-сборки можно указать `--source-dir` с релизным ZIP, файлами `tproxy-manager.sh`, `vless2json.sh` и `LICENSE` TPROXY Manager. [Релиз Xray](https://github.com/XTLS/Xray-core/releases/expanded_assets/v26.10.31) · [Ревизия TPROXY Manager](https://github.com/rico-x/tproxy-manager/tree/10b4cb8afdd6db9ee8ce30f0532831e2c0e2a511)
@@ -47,7 +47,7 @@ HWID создаётся на устройстве и хранится в `/etc/v
 
 ```sh
 python3 luci/build-ipk.py /path/to/artifacts
-python3 install/build-apk.py /path/to/artifacts/luci-app-vpn-routing_0.3.11-2_all.ipk vpn-routing-apk \
+python3 install/build-apk.py /path/to/artifacts/luci-app-vpn-routing_0.3.12-1_all.ipk vpn-routing-apk \
     --apk /path/to/sdk/staging_dir/host/bin/apk --source-dir /path/to/pinned-sources
 ```
 
@@ -70,7 +70,7 @@ cd /tmp/vpn-routing-apk
 sha256sum -c SHA256SUMS &&
 sh check-inactive.sh &&
 apk --no-network --repositories-file /dev/null --allow-untrusted add \
-    ./vpn-routing-runtime-26.10.31-r1.apk ./luci-app-vpn-routing-0.3.11-r2.apk
+    ./vpn-routing-runtime-26.10.31-r1.apk ./luci-app-vpn-routing-0.3.12-r1.apk
 ```
 
 Сборщик также принимает `--sign-key` с путём к закрытому ключу вне проекта. Для пакетов, подписанных ключом, которому роутер уже доверяет, уберите `--allow-untrusted`. [Параметры подписи apk-tools](https://github.com/alpinelinux/apk-tools/blob/v3.0.5/doc/apk.8.scd#L305-L316)

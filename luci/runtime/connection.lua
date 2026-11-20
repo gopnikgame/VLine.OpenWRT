@@ -2,6 +2,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
     local root = platform.runtime_dir
     local settings_path = platform.config_dir .. "/connection.json"
     local policy_path = platform.config_dir .. "/policy.json"
+    local routing_update_path = platform.config_dir .. "/routing-update.json"
     local cache_path = root .. "/subscription.json"
     local refresh_path = root .. "/subscription-refresh.json"
     local journal_path = root .. "/operation.json"
@@ -9,7 +10,9 @@ return function(json, platform, core, subscription, probe, capture, service, rou
     local recovery_delay = 45
     local settings_limit = 32 * 1024
     local policy_limit = 128 * 1024
+    local routing_update_limit = 192 * 1024
     local default_capture = json.object({ mode = "all", interface = "br-lan" })
+    local recover_routing
 
     local function load(path, limit)
         local info = platform.lstat(path)
@@ -37,7 +40,8 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         }
         if not value then return result end
         for key in pairs(value) do
-            if key ~= "subscriptionHosts" and key ~= "probeUrl" and key ~= "capture" and key ~= "routing" then
+            if key ~= "subscriptionHosts" and key ~= "probeUrl" and key ~= "capture" and key ~= "routing"
+                and key ~= "routingSubscription" then
                 return nil, "policy_invalid"
             end
         end
@@ -64,7 +68,108 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             result.routing = routing and routing.validate(value.routing)
             if not result.routing then return nil, "policy_invalid" end
         end
+        if value.routingSubscription ~= nil then
+            local binding = value.routingSubscription
+            if not json.is_object(binding) or not subscription.valid_url(binding.url)
+                or (binding.source ~= "happ" and binding.source ~= "incy" and binding.source ~= "none") then
+                return nil, "policy_invalid"
+            end
+            for key in pairs(binding) do
+                if key ~= "url" and key ~= "source" then return nil, "policy_invalid" end
+            end
+            if (binding.source == "none" and result.routing)
+                or (binding.source ~= "none" and (not result.routing or result.routing.source ~= binding.source)) then
+                return nil, "policy_invalid"
+            end
+            result.binding = binding
+        end
         return result
+    end
+
+    local function routing_sources(offers)
+        local sources = json.array()
+        for _, source in ipairs({ "happ", "incy" }) do
+            if offers and offers[source] then sources[#sources + 1] = source end
+        end
+        return sources
+    end
+
+    local function routing_choice(value, config)
+        local binding = config.binding
+        return { routingSources = routing_sources(value.routingOffers),
+            routingSource = binding and binding.url == value.url and binding.source or nil,
+            hasManualRouting = config.routing ~= nil and binding == nil }
+    end
+
+    local function subscription_routing(dir, config, server, requested)
+        if server.source then
+            if requested then return nil, "invalid_request" end
+            return config
+        end
+        if requested and requested ~= "happ" and requested ~= "incy" and requested ~= "none" then
+            return nil, "routing_invalid"
+        end
+        local binding = config.binding
+        if not requested and binding and binding.url == server.url then
+            requested = binding.source
+            -- A saved server can reconnect without a new HTTP response. Boot restore never fetches routing.
+            if not server.routingOffers then return config end
+        elseif not requested and config.routing and not binding then
+            return config
+        end
+        if not requested then
+            local sources = routing_sources(server.routingOffers)
+            if #sources > 1 then return nil, "routing_choice_required" end
+            requested = sources[1]
+        end
+        local profile, err
+        if requested and requested ~= "none" then
+            local params
+            params, err = subscription.routing_params(server.routingOffers, requested, dir)
+            if not params then return nil, err end
+            profile, err = routing.import(params, dir, service.validate_routing)
+            if not profile then return nil, err end
+        end
+        local result = {}
+        for key, value in pairs(config) do result[key] = value end
+        result.value = json.decode(json.encode(config.value))
+        result.routing = profile
+        result.binding = requested and json.object({ url = server.url, source = requested }) or nil
+        result.value.routing, result.value.routingSubscription = result.routing, result.binding
+        return result
+    end
+
+    local function write_policy(config)
+        local bytes = json.encode(config.value) .. "\n"
+        if #bytes > policy_limit then return nil, "routing_invalid" end
+        if not platform.private_dir(platform.config_dir) or not platform.write(policy_path, bytes, true) then
+            return nil, "storage_error"
+        end
+        return true
+    end
+
+    local function with_routing(previous_config, config, callback)
+        if json.equal(previous_config.value, config.value) then return callback() end
+        local previous_settings, read_error = load(settings_path, settings_limit)
+        if read_error then return nil, read_error end
+        local rollback = json.object({ policy = previous_config.value, settings = previous_settings or false })
+        local rollback_bytes = json.encode(rollback) .. "\n"
+        if #rollback_bytes > routing_update_limit or not platform.private_dir(platform.config_dir)
+            or not platform.write(routing_update_path, rollback_bytes, true) then return nil, "storage_error" end
+        -- Candidate rules/DAT have passed the compiler and Xray before they become boot intent.
+        local written, err = write_policy(config)
+        if not written then
+            if not recover_routing() then return nil, "rollback_failed" end
+            return nil, err
+        end
+        local ok, result, failure, committed = pcall(callback)
+        if not ok or (not result and not committed) then
+            if not recover_routing() then return nil, "rollback_failed" end
+        elseif not platform.remove(routing_update_path, true) then
+            return nil, "storage_error"
+        end
+        if not ok then return nil, "apply_failed" end
+        return result, failure
     end
 
     local function stable(operation, previous)
@@ -103,6 +208,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
                 if not profile then return nil, err end
             end
             config.routing, config.value.routing = profile, profile
+            config.binding, config.value.routingSubscription = nil, nil
         end
 
         if action ~= "settings" then
@@ -122,7 +228,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         return {
             editable = not locked, capture = config.capture, networks = networks, hwid = device.get(),
             routing = config.routing and json.object({ source = config.routing.source,
-                managedGeo = asset_dir and true or nil }) or nil,
+                managedGeo = asset_dir and true or nil, fromSubscription = config.binding and true or nil }) or nil,
             routingStatus = routing_status,
         }
     end
@@ -146,7 +252,8 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             return nil
         end
         if not valid_id(value.snapshot) or type(value.url) ~= "string" or not json.is_array(value.servers)
-            or not valid_source(value.sourceHost) then
+            or not valid_source(value.sourceHost)
+            or (value.routingOffers ~= nil and not subscription.valid_offers(value.routingOffers)) then
             return nil, "storage_error"
         end
         for _, server in ipairs(value.servers) do
@@ -272,8 +379,8 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         return match
     end
 
-    local function save_subscription(path, url, source_host, servers, previous, preferred, next_revision, current)
-        if current and #current.servers == #servers then
+    local function save_subscription(path, url, source_host, servers, previous, preferred, next_revision, current, offers)
+        if current and json.equal(current.routingOffers, offers) and #current.servers == #servers then
             local same = true
             for index, server in ipairs(servers) do
                 local old = current.servers[index]
@@ -297,7 +404,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             servers[index] = json.object(server)
         end
         local value = { snapshot = snapshot, url = url, servers = json.array(servers), created = platform.uptime(),
-            sourceHost = source_host, revision = next_revision }
+            sourceHost = source_host, revision = next_revision, routingOffers = offers }
         if save(path, value) then return value end
     end
 
@@ -308,7 +415,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         local source_host = confirm_host
             or (previous and previous.url == url and previous.sourceHost)
             or (current and current.url == url and current.sourceHost) or nil
-        local servers, fetch_error = subscription.fetch(url, config.hosts, source_host)
+        local servers, fetch_error, offers = subscription.fetch(url, config.hosts, source_host)
         if not servers then return nil, fetch_error end
         local preferred = previous and previous.url == url and match_server(servers, previous)
         local next_revision = math.max(revision(current), revision(cache(refresh_path))) + 1
@@ -316,10 +423,12 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         if previous and previous.url == url and subscription.permitted(url, config.hosts, previous.sourceHost) then
             path, source_host = refresh_path, previous.sourceHost
         end
-        local value = save_subscription(path, url, source_host, servers, previous, preferred, next_revision, nil)
+        local value = save_subscription(path, url, source_host, servers, previous, preferred, next_revision, nil, offers)
         if not value then return nil, "storage_error" end
-        return { snapshot = value.snapshot, servers = public_servers(value),
-            preferredServerId = preferred and previous.serverId or nil }
+        local response = routing_choice(value, config)
+        response.snapshot, response.servers = value.snapshot, public_servers(value)
+        response.preferredServerId = preferred and previous.serverId or nil
+        return response
     end
 
     local function select_server(params, hosts, previous)
@@ -345,7 +454,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             for _, server in ipairs(value.servers) do
                 if server.id == params.server then
                     return { id = server.id, name = server.name, link = server.link,
-                        url = value.url, sourceHost = value.sourceHost }
+                        url = value.url, sourceHost = value.sourceHost, routingOffers = value.routingOffers }
                 end
             end
         end
@@ -425,6 +534,10 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             if current and current.url == displayed.url then
                 info.snapshot = current.snapshot
                 info.servers = public_servers(current)
+                local config = policy()
+                if config then
+                    for key, value in pairs(routing_choice(current, config)) do info[key] = value end
+                end
             elseif result.hasSavedSubscription then
                 info.snapshot = previous.primarySnapshot or previous.generation
                 info.servers = json.array({ json.object({ id = previous.serverId, name = previous.serverName }) })
@@ -470,6 +583,9 @@ return function(json, platform, core, subscription, probe, capture, service, rou
     end
 
     local function remove_subscription(dir, operation, previous)
+        local config, policy_error = policy()
+        if not config then return nil, policy_error end
+        if config.binding and operation then return nil, "subscription_busy" end
         if operation or (previous and previous.resume) then
             if not previous or not previous.resume or previous.activeSource ~= "reserve"
                 or (operation and not stable(operation, previous)) then return nil, "subscription_busy" end
@@ -477,6 +593,11 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             local state, err = guard.inspect(saved_scope(previous), dir)
             if not state then return nil, err end
             if state ~= "absent" then return nil, "subscription_busy" end
+        end
+        if config.binding then
+            config.value.routing, config.value.routingSubscription = nil, nil
+            local written, write_error = write_policy(config)
+            if not written then return nil, write_error end
         end
         if platform.lstat(cache_path) and not platform.remove(cache_path) then return nil, "storage_error" end
         if platform.lstat(refresh_path) and not platform.remove(refresh_path) then return nil, "storage_error" end
@@ -631,7 +752,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
 
         local ok, result, failure = pcall(apply)
         if ok and result then
-            if failure then return nil, failure end
+            if failure then return nil, failure, true end
             return result
         end
         operation.stopping = true
@@ -643,7 +764,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         return nil, ok and failure or "apply_failed"
     end
 
-    local function restore(dir, operation, previous, guard_only)
+    local function restore(dir, operation, previous, guard_only, rollback_config)
         local protected_scope, protect_error = protect_saved(dir, previous)
         if not protected_scope then return nil, protect_error end
         if guard_only then return { state = "restoring" } end
@@ -653,7 +774,8 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             end
             if not cleanup(dir, operation) then return nil, "rollback_failed" end
         end
-        local config, config_error = policy()
+        local config, config_error = rollback_config, nil
+        if not config then config, config_error = policy() end
         if not config then return nil, config_error end
         config.capture = protected_scope
         local server = selected_server(previous)
@@ -664,7 +786,7 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         return connect(dir, config, server, previous, previous.generation)
     end
 
-    local function replace_server(dir, config, operation, previous, server)
+    local function replace_server(dir, config, operation, previous, server, rollback_config)
         local scope, scope_error = saved_scope(previous)
         if not scope then return nil, scope_error end
         config.capture = scope
@@ -677,21 +799,78 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             if not save(journal_path, operation) then return nil, "storage_error" end
             if not cleanup(dir, operation) then return nil, "rollback_failed" end
         end
-        local connected, err = connect(dir, config, server, previous, previous.generation, candidate)
+        local connected, err, committed = connect(dir, config, server, previous, previous.generation, candidate)
         if connected then return connected end
+        if committed then return nil, err, true end
         local saved_now, saved_error = saved()
         if saved_error or not saved_now then return nil, "rollback_failed" end
-        -- A write can report a sync failure after the new intent becomes visible.
-        local current = selected_server(saved_now)
-        if saved_now.generation == previous.generation and current and current.source == server.source
-            and current.id == server.id and current.link == server.link then return nil, err end
         local interrupted, journal_error = journal()
         if journal_error then return nil, "rollback_failed" end
-        local restored = restore(dir, interrupted, previous)
+        local restored = restore(dir, interrupted, previous, false, rollback_config)
         if not restored or restored.state ~= "connected" or restored.serverId ~= selected_server(previous).id then
             return nil, "rollback_failed"
         end
         return nil, err
+    end
+
+    recover_routing = function(cancel_restore)
+        if not platform.lstat(routing_update_path) then return true end
+        local transaction, err = load(routing_update_path, routing_update_limit)
+        if not transaction then return nil, err or "storage_error" end
+        if not json.is_object(transaction.policy)
+            or (transaction.settings ~= false and not json.is_object(transaction.settings)) then
+            return nil, "storage_error"
+        end
+        for key in pairs(transaction) do
+            if key ~= "policy" and key ~= "settings" then return nil, "storage_error" end
+        end
+        if cancel_restore and transaction.settings ~= false then
+            -- Explicit Disconnect must remain possible when the rollback server is unreachable.
+            -- Persist cancellation in the undo record before cleanup, so another interruption cannot re-enable it.
+            transaction.settings.resume = false
+            if not save(routing_update_path, transaction, true) then return nil, "rollback_failed" end
+        end
+        return platform.with_workspace(function(dir)
+            local operation, journal_error = journal()
+            if journal_error then return nil, "rollback_failed" end
+            local previous = transaction.settings ~= false and transaction.settings or nil
+            local current_settings = load(settings_path, settings_limit)
+            local unchanged_intent = json.equal(current_settings, previous)
+            local scope = operation and operation.scope
+                or (previous and previous.scope) or transaction.policy.capture or default_capture
+            scope = capture.validate(scope)
+            if not scope then return nil, "rollback_failed" end
+            -- A durable rollback record survives process death and power loss at any subsequent write.
+            if operation or (previous and previous.resume) then
+                if not guard.start(scope, dir) then return nil, "rollback_failed" end
+            end
+            if not write_policy({ value = transaction.policy }) then return nil, "rollback_failed" end
+            if previous then
+                if not save(settings_path, previous, true) then return nil, "rollback_failed" end
+            elseif platform.lstat(settings_path) and not platform.remove(settings_path, true) then
+                return nil, "rollback_failed"
+            end
+            if previous and previous.resume then
+                local checked, saved_error = saved()
+                if saved_error or not checked then return nil, "rollback_failed" end
+                local config = policy()
+                if not config then return nil, "rollback_failed" end
+                local assets = config.routing and routing.asset_path(config.routing)
+                local ready = unchanged_intent and operation and operation.serverId == selected_server(checked).id
+                    and connection_ready(dir, operation, checked, assets)
+                    and service.routing_matches(config.routing and config.routing.rules, operation.healthPort)
+                if not ready then
+                    if operation and not cleanup(dir, operation) then return nil, "rollback_failed" end
+                    local restored = restore(dir, nil, checked)
+                    if not restored or restored.state ~= "connected" then return nil, "rollback_failed" end
+                end
+            else
+                if operation and not cleanup(dir, operation) then return nil, "rollback_failed" end
+                if not guard.stop(scope, dir) then return nil, "rollback_failed" end
+            end
+            if not platform.remove(routing_update_path, true) then return nil, "rollback_failed" end
+            return true
+        end)
     end
 
     local function refresh_subscription(dir, operation, previous)
@@ -712,21 +891,31 @@ return function(json, platform, core, subscription, probe, capture, service, rou
         end
         local config, config_error = policy()
         if not config then return nil, config_error end
-        local servers, fetch_error = subscription.fetch(previous.url, config.hosts, previous.sourceHost)
+        local servers, fetch_error, offers = subscription.fetch(previous.url, config.hosts, previous.sourceHost)
         if not servers then return nil, fetch_error end
         local selected = match_server(servers, previous, true)
         local current = refreshed(previous)
         local next_revision = math.max(revision(current), revision(cache(cache_path, previous.url))) + 1
-        local value = save_subscription(refresh_path, previous.url, previous.sourceHost, servers, previous, selected,
-            next_revision, current)
-        if not value then return nil, "storage_error" end
-        if previous.resume and not previous.activeSource and selected and selected.link ~= previous.link then
-            local refreshed_server = { id = previous.serverId, name = selected.name, link = selected.link,
-                url = previous.url, sourceHost = previous.sourceHost }
-            local connected, err = replace_server(dir, config, operation, previous, refreshed_server)
-            if not connected then return nil, err end
-            return { state = "reconnected" }
+        local reconnected = false
+        if selected and not previous.activeSource then
+            local server = { id = previous.serverId, name = selected.name, link = selected.link,
+                url = previous.url, sourceHost = previous.sourceHost, routingOffers = offers }
+            local next_config, routing_error = subscription_routing(dir, config, server)
+            if not next_config then return nil, routing_error end
+            local changed = not json.equal(config.value, next_config.value)
+            local applied, apply_error = with_routing(config, next_config, function()
+                if previous.resume and (selected.link ~= previous.link or changed) then
+                    reconnected = true
+                    return replace_server(dir, next_config, operation, previous, server, config)
+                end
+                return { state = "updated" }
+            end)
+            if not applied then return nil, apply_error end
         end
+        local value = save_subscription(refresh_path, previous.url, previous.sourceHost, servers, previous, selected,
+            next_revision, current, offers)
+        if not value then return nil, "storage_error" end
+        if reconnected then return { state = "reconnected" } end
         if restore_error then return nil, restore_error end
         if not selected then return { state = "retained" } end
         if selected.link == previous.link and selected.name ~= previous.serverName then
@@ -737,6 +926,8 @@ return function(json, platform, core, subscription, probe, capture, service, rou
     end
 
     local function handle(action, params)
+        local recovered, recovery_error = recover_routing(action == "disconnect")
+        if not recovered then return nil, recovery_error end
         if action == "subscription" or action == "probe" then
             local config, err = policy()
             if not config then return nil, err end
@@ -792,14 +983,18 @@ return function(json, platform, core, subscription, probe, capture, service, rou
             if not config then return nil, config_error end
             local server, select_error = select_server(params, config.hosts, previous)
             if not server then return nil, select_error end
+            local next_config, routing_error = subscription_routing(dir, config, server, params.routingSource)
+            if not next_config then return nil, routing_error end
             if switching then
                 if not server.source and previous.url
                     and (server.url ~= previous.url or server.sourceHost ~= previous.sourceHost) then
                     return nil, "connection_changed"
                 end
-                return replace_server(dir, config, operation, previous, server)
+                return with_routing(config, next_config, function()
+                    return replace_server(dir, next_config, operation, previous, server, config)
+                end)
             end
-            return connect(dir, config, server, previous)
+            return with_routing(config, next_config, function() return connect(dir, next_config, server, previous) end)
         end)
     end
 

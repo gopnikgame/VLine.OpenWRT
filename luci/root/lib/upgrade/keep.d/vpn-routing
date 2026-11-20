@@ -1,3 +1,4 @@
 /etc/vpn-routing-hwid
 /etc/vpn-routing/policy.json
+/etc/vpn-routing/routing-update.json
 /etc/vpn-routing/geodata/

@@ -235,11 +235,19 @@ function connectionPanel() {
 		'aria-labelledby': PREFIX + 'server-title',
 	});
 	const probeProgress = text('p', 'vpn-routing-hint vpn-routing-probe-progress', '', { role: 'status', hidden: '' });
+	const routeHint = text('p', 'vpn-routing-hint', '', { id: PREFIX + 'subscription-rules-help' });
+	const routeSource = E('select', {
+		id: PREFIX + 'subscription-rules', class: 'vpn-routing-field vpn-routing-server-select',
+		'aria-describedby': routeHint.id,
+	});
+	const routeChoice = E('div', { class: 'vpn-routing-form-field', hidden: '' }, [
+		text('label', 'vpn-routing-label', 'Правила маршрутизации', { for: routeSource.id }), routeSource, routeHint,
+	]);
 	const controls = E('div', { class: 'vpn-routing-server-controls', hidden: '' }, [
 		E('div', { class: 'vpn-routing-section-heading' }, [
 			text('h3', '', 'Серверы', { id: PREFIX + 'server-title' }), checkAll,
 		]),
-		serverList, probeProgress,
+		serverList, probeProgress, routeChoice,
 	]);
 	const listStatus = text('p', 'vpn-routing-hint', '', {
 		id: PREFIX + 'server-status', role: 'status',
@@ -276,6 +284,7 @@ function connectionPanel() {
 	let hasSubscription = false;
 	let loadedSubscription = false;
 	let subscriptionServers = null;
+	let routeHelp = '';
 	let reserve = null;
 	let selected = '';
 	let rows = new Map();
@@ -307,6 +316,15 @@ function connectionPanel() {
 		rollback_failed: 'Подключение не удалось. Отключите VPN Routing для завершения отката.',
 		disconnect_failed: 'Отключение не подтверждено. Обновите статус и повторите.',
 		storage_error: 'Не удалось надёжно сохранить состояние VPN Routing на роутере.',
+		routing_choice_required: 'Подписка содержит несколько форматов правил. Выберите Happ или INCY.',
+		routing_missing: 'Выбранные правила отсутствуют в подписке. Получите серверы заново и проверьте источник.',
+		routing_ambiguous: 'Подписка содержит разные профили одного формата. Уточните профиль у поставщика.',
+		routing_invalid: 'Правила подписки не прошли проверку. Прежние правила сохранены.',
+		routing_download: 'Не удалось загрузить профиль правил. Повторите подключение позже.',
+		routing_assets_download: 'Не удалось скачать базы маршрутизации. Прежние правила сохранены.',
+		routing_assets_invalid: 'Базы маршрутизации не прошли проверку. Прежние правила сохранены.',
+		routing_assets: 'Проверьте сохранённые базы маршрутизации на роутере.',
+		routing_check_failed: 'Xray отклонил правила подписки. Прежние правила сохранены.',
 	}));
 
 	function switching() {
@@ -327,6 +345,15 @@ function connectionPanel() {
 		const subscriptionLocked = running && (connection.activeSource !== 'reserve' || connection.hasSavedSubscription);
 		const change = switching();
 		const busy = active !== '' || scan !== null;
+		const subscriptionSelected = rows.has(selected) && selected !== reserve?.id;
+		const savedRules = subscriptionServers?.routingSource;
+		routeChoice.hidden = !subscriptionSelected || (!subscriptionServers?.routingSources?.length && (!savedRules || savedRules === 'none'));
+		routeSource.disabled = busy || Boolean(running && !change);
+		routeHint.textContent = running && !change
+			? subscriptionServers?.hasManualRouting ? 'Используется ручной профиль. Для изменения правил отключите VPN.'
+				: routeSource.value === 'none' ? 'Правила подписки отключены. Для изменения отключите VPN.'
+				: 'Для изменения правил отключите VPN. Выбранный профиль обновляется вместе с подпиской.' : routeHelp;
+		const chooseRules = !routeChoice.hidden && !routeSource.value && !subscriptionServers.hasManualRouting;
 		getServers.disabled = busy;
 		removeSubscription.hidden = !canRemoveSubscription();
 		removeSubscription.disabled = busy;
@@ -346,7 +373,8 @@ function connectionPanel() {
 		check.disabled = busy || !rows.has(selected);
 		checkAll.disabled = scan ? scan.cancelled : busy || !rows.size;
 		checkAll.textContent = scan ? 'Остановить проверку' : 'Проверить все';
-		connect.disabled = busy || !confirmed || (!running && (!rows.has(selected) || connection.canConnect === false));
+		connect.disabled = busy || !confirmed || ((!running || change) && chooseRules)
+			|| (!running && (!rows.has(selected) || connection.canConnect === false));
 		connect.textContent = running && !change ? 'Отключить' : 'Подключить';
 		connect.classList.toggle('vpn-routing-primary', !running || change);
 		refresh.disabled = busy;
@@ -431,7 +459,30 @@ function connectionPanel() {
 					throw new Error('invalid server');
 				ids.add(server.id);
 			}
+			const formats = data.routingSources || [];
+			if (!Array.isArray(formats) || formats.length > 2 || new Set(formats).size !== formats.length ||
+			    formats.some(source => !['happ', 'incy'].includes(source)) ||
+			    (data.routingSource !== undefined && !['happ', 'incy', 'none'].includes(data.routingSource)) ||
+			    (data.hasManualRouting !== undefined && typeof data.hasManualRouting !== 'boolean'))
+				throw new Error('invalid subscription routing');
+			data.routingSources = formats;
 		}
+		const previousChoice = data?.snapshot === subscriptionServers?.snapshot &&
+			data?.hasManualRouting === subscriptionServers?.hasManualRouting && data?.routingSource === subscriptionServers?.routingSource
+			? routeSource.value : null;
+		const formats = data?.routingSources || [];
+		const missing = data?.routingSource && data.routingSource !== 'none' && !formats.includes(data.routingSource);
+		routeSource.replaceChildren(
+			...(data?.hasManualRouting || missing || formats.length > 1 ? [E('option', { value: '' },
+				data?.hasManualRouting ? 'Сохранённые вручную правила' : 'Выберите формат правил')] : []),
+			...formats.map(source => E('option', { value: source }, source === 'happ' ? 'Из подписки · Happ' : 'Из подписки · INCY')),
+			E('option', { value: 'none' }, 'Весь трафик через VPN'),
+		);
+		routeSource.value = previousChoice ?? (data?.hasManualRouting ? '' : data?.routingSource ?? (formats.length === 1 ? formats[0] : ''));
+		routeHelp = missing ? 'Сохранённый формат больше не передаётся. Выберите другой формат или весь трафик через VPN.'
+			: data?.hasManualRouting ? 'Используется сохранённый вручную профиль. Для замены выберите правила подписки.'
+			: formats.length > 1 ? 'Выберите один формат. Его правила загрузятся и сохранятся при подключении.'
+			: 'Правила из подписки загрузятся при подключении и будут обновляться вместе с ней.';
 		subscriptionServers = data;
 		renderServers(preferred, fallback);
 		setStatus(listStatus, 'idle', data?.savedOnly ? 'Сохранённый сервер подписки.'
@@ -644,7 +695,10 @@ function connectionPanel() {
 						clearUrlError();
 						setServers(null, selected, data.serverId);
 					}
-					if (savedUrl === url.input.value && data.subscription.snapshot && data.subscription.snapshot !== subscriptionServers?.snapshot) {
+					if (savedUrl === url.input.value && data.subscription.snapshot &&
+					    (data.subscription.snapshot !== subscriptionServers?.snapshot ||
+					     data.subscription.routingSource !== subscriptionServers?.routingSource ||
+					     data.subscription.hasManualRouting !== subscriptionServers?.hasManualRouting)) {
 						try {
 							setServers(data.subscription, selected, data.serverId);
 							loadedSubscription = true;
@@ -792,13 +846,15 @@ function connectionPanel() {
 		if (!confirmed)
 			return;
 		const snapshot = rows.get(selected)?.snapshot;
+		const routing = !routeChoice.hidden && !routeSource.disabled && routeSource.value ? { routingSource: routeSource.value } : {};
 		if (switching())
-			requestConnection('connect', { snapshot, server: selected, activeServer: connection.serverId });
+			requestConnection('connect', { snapshot, server: selected, activeServer: connection.serverId, ...routing });
 		else if (connection.state !== 'disconnected')
 			requestConnection('disconnect');
 		else if (rows.has(selected))
-			requestConnection('connect', { snapshot, server: selected });
+			requestConnection('connect', { snapshot, server: selected, ...routing });
 	});
+	routeSource.addEventListener('change', updateActions);
 	check.addEventListener('click', () => {
 		if (rows.has(selected))
 			requestConnection('probe', { snapshot: rows.get(selected).snapshot, server: selected });
@@ -854,7 +910,8 @@ function validRoutingRules(rules) {
 function readSettings(data) {
 	if (typeof data.editable !== 'boolean' || !Array.isArray(data.networks) || data.networks.length > 128 ||
 	    (data.routing != null && (!['happ', 'incy'].includes(data.routing.source) ||
-	     (data.routing.managedGeo !== undefined && data.routing.managedGeo !== true))))
+	     (data.routing.managedGeo !== undefined && data.routing.managedGeo !== true) ||
+	     (data.routing.fromSubscription !== undefined && data.routing.fromSubscription !== true))))
 		throw new Error('invalid settings');
 	const routing = data.routingStatus;
 	if (routing != null && (!['applied', 'default', 'inactive', 'unverified'].includes(routing.state) ||
@@ -1139,7 +1196,8 @@ function routingOverview(editor, refreshSettings) {
 		]),
 		update(settings, busy) {
 			const saved = settings?.routing?.source;
-			const source = saved === 'happ' ? 'Happ' : 'INCY';
+			const format = saved === 'happ' ? 'Happ' : 'INCY';
+			const source = settings?.routing?.fromSubscription ? 'подписки (' + format + ')' : format;
 			const runtime = settings?.routingStatus;
 			let label = busy ? 'Загружаем статус маршрутизации…' : 'Статус маршрутизации недоступен';
 			let detail = '', kind = busy ? 'busy' : 'empty';
@@ -1165,6 +1223,8 @@ function routingOverview(editor, refreshSettings) {
 				setStatus(status, kind, label);
 			hint.hidden = !detail;
 			hint.textContent = detail;
+			if (settings?.routing?.fromSubscription)
+				hint.textContent += ' Профиль обновляется вместе с подпиской.';
 			counts.hidden = !runtime?.counts;
 			counts.replaceChildren(...(runtime?.counts ? GROUPS.map(({ tag, title }) =>
 				text('span', 'vpn-routing-scope', title + ' · ' + runtime.counts[tag])) : []));

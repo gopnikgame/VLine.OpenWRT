@@ -10,7 +10,7 @@ import tarfile
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = "luci-app-vpn-routing"
-VERSION = "0.3.11-2"
+VERSION = "0.3.12-1"
 CONFLICTS = ("luci-app-vline-routing", "vline-routing-runtime")
 KEEP = "lib/upgrade/keep.d/vpn-routing"
 LICENSE_PATH = f"usr/share/licenses/{PACKAGE}/LICENSE"

@@ -109,7 +109,7 @@ local actions = {
     remove_subscription = {},
     save_reserve = { name = 160, link = 8192, snapshot = 128 },
     remove_reserve = { snapshot = 128 },
-    connect = { server = 128, snapshot = 128, activeServer = 128 },
+    connect = { server = 128, snapshot = 128, activeServer = 128, routingSource = 12 },
     disconnect = {},
     probe = { server = 128, snapshot = 128 },
     settings = {},
@@ -131,6 +131,7 @@ local failures = {
     too_large = 413,
     unsupported_subscription = 422, invalid_server = 422, invalid_reserve_name = 422, capture_policy = 422, policy_invalid = 422,
     routing_invalid = 422, routing_assets = 422, routing_assets_invalid = 422, routing_check_failed = 422,
+    routing_choice_required = 409, routing_missing = 422, routing_ambiguous = 422, routing_download = 502,
     internal_error = 500, storage_error = 500, rollback_failed = 500, disconnect_failed = 500,
     apply_failed = 502, capture_failed = 502, check_failed = 502, subscription_unavailable = 502, probe_failed = 502,
     guard_failed = 502, hwid_rejected = 502, routing_assets_download = 502,
@@ -157,7 +158,8 @@ local function action_form(params, action)
     end
     for key, limit in pairs(required) do
         local value = params[key]
-        local optional = key == "activeServer" or key == "bootstrap" or (key == "snapshot" and action == "save_reserve")
+        local optional = key == "activeServer" or key == "routingSource" or key == "bootstrap"
+            or (key == "snapshot" and action == "save_reserve")
         local omitted = optional and value == nil
         if not omitted and (type(value) ~= "string" or value == "" or #value > limit
             or (key == "address" and value:find("[%c%s]"))
@@ -166,6 +168,8 @@ local function action_form(params, action)
             return false
         end
     end
+    if action == "connect" and params.routingSource ~= nil and params.routingSource ~= "happ"
+        and params.routingSource ~= "incy" and params.routingSource ~= "none" then return false end
     return true
 end
 

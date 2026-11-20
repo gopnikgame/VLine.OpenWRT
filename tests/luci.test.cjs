@@ -275,6 +275,22 @@ test('Only connect accepts an exact active-server ID for switching', (t) => {
     }
 });
 
+test('Only authenticated connect accepts a bounded subscription routing choice', (t) => {
+    const call = fixtures(t);
+    const params = { token, snapshot: 'list-1', server: 'target-2' };
+    for (const routingSource of ['happ', 'incy', 'none']) {
+        assert.equal(call({ ...params, routingSource }, { method: 'connect' })[0], 200);
+        assert.equal(call({ ...params, routingSource, token: 'wrong' }, { method: 'connect' })[0], 403);
+        assert.equal(call({ ...params, routingSource }, { method: 'probe' })[0], 400);
+    }
+    for (const routingSource of ['', 'auto', 'subscription', 'happ\n', ['happ'], 1, null])
+        assert.equal(call({ ...params, routingSource }, { method: 'connect' })[0], 400);
+    for (const [failure, status] of [['routing_choice_required', 409], ['routing_missing', 422],
+        ['routing_ambiguous', 422], ['routing_download', 502]])
+        assert.deepEqual(call({ ...params, routingSource: 'incy' }, { method: 'connect', failure }),
+            [status, { ok: false, error: failure }]);
+});
+
 test('LuCI removes subscriptions only through authenticated token-only POST', (t) => {
     const call = fixtures(t);
     const method = 'remove_subscription';

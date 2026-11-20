@@ -53,7 +53,7 @@ local function fixture(body, options)
         calls.private_config = files[option(argv, "--config")]
         files[option(argv, "--output")] = body
         local dump = option(argv, "--dump-header")
-        if dump then files[dump] = options.headers end
+        if dump then files[dump] = options.headers or "HTTP/2 200\r\n\r\n" end
         local status = options.status or "200"
         if option(argv, "--write-out") == "%{http_code}" then
             files[run_options.stdout] = status
@@ -263,5 +263,71 @@ servers = assert(backend.fetch(SOURCE, ALLOWED))
 equal(#servers, 256)
 equal(servers[1].name, "1")
 equal(servers[256].name, "256")
+
+-- Routing arrives with the response, in headers or the plain/base64 subscription body.
+local profile_json = '{"GlobalProxy":"true","DomainStrategy":"AsIs","DirectSites":["domain:domestic.example.test"]}'
+local happ = "happ://routing/onadd/" .. base64(profile_json)
+local incy = "incy://autorouting/onadd/https://profiles.example.test/policy.json"
+local function fetched(body, headers)
+    local client = fixture(body, { headers = headers })
+    return client.fetch(SOURCE, ALLOWED)
+end
+local list, err, offers = fetched(VLESS, "HTTP/1.1 103 Early Hints\r\nrouting: ignored\r\n\r\nHTTP/2 200\r\nRouting: " .. happ .. "\r\nAutorouting: " .. incy .. "\r\n\r\n")
+assert(list and not err and #list == 1 and offers.happ == happ and offers.incy == incy)
+list, err, offers = fetched(base64(VLESS .. "\n" .. happ .. "\n" .. incy))
+assert(list and offers.happ == happ and offers.incy == incy)
+local compiled = dofile("luci/runtime/routing.lua")(json, {}, core)
+backend = fixture("")
+local params = assert(backend.routing_params(offers, "happ", WORKSPACE))
+local rules = assert(compiled.compile(params)).rules.rules
+assert(#rules == 2 and rules[1].outboundTag == "direct" and rules[2].outboundTag == "proxy")
+-- One format never implicitly wins over another. Conflicting profiles of one format fail closed.
+local conflict = "happ://routing/onadd/" .. base64(profile_json:gsub("domestic", "other"))
+list, err = fetched(VLESS .. "\n" .. conflict, "HTTP/2 200\r\nrouting: " .. happ .. "\r\n\r\n")
+assert(not list and err == "routing_ambiguous")
+list, err, offers = fetched(table.concat(many, "\n") .. "\n" .. happ)
+assert(#list == 256 and offers.happ == happ, "routing after server 256 must still be examined")
+for _, headers in ipairs({
+    "HTTP/2 200\r\nautorouting: https://profiles.example.test/policy.json\r\n\r\n",
+    "HTTP/2 200\r\nrouting: " .. happ .. "\r\n folded\r\n\r\n",
+    "HTTP/2 200\r\n\r\nHTTP/2 200\r\n\r\n",
+    "HTTP/2 200\r\nx: bad\rvalue\r\n\r\n",
+    "HTTP/2 200\r\nrouting: " .. happ .. "\r\n", -- truncated dump
+}) do
+    list, err = fetched(VLESS, headers)
+    assert(not list and err == "routing_invalid")
+end
+for _, url in ipairs({
+    "http://profiles.example.test/policy.json", "https://127.0.0.1/policy.json",
+    "https://profiles.example.test:443/policy.json", "https://profiles.example.test/../policy.json",
+    "https://profiles.example.test/policy.json?token=synthetic", "https://user@profiles.example.test/policy.json",
+}) do
+    list, err = fetched(VLESS .. "\nincy://autorouting/onadd/" .. url)
+    assert(not list and err == "routing_invalid")
+end
+-- INCY fetch uses the source supplied by this subscription, with public-IP pinning and no HWID.
+backend, calls = fixture(profile_json, { host = "profiles.example.test" })
+params = assert(backend.routing_params(json.object({ incy = incy }), "incy", WORKSPACE))
+assert(compiled.compile(params).source == "incy")
+assert(calls.identity == 0 and calls.curl == 1 and not calls.private_config:find(HWID, 1, true))
+assert(not table.concat(calls.argv, " "):find("https://", 1, true))
+equal(option(calls.argv, "--max-redirs"), "0")
+equal(option(calls.argv, "--resolve"), "profiles.example.test:443:1.1.1.1,8.8.8.8")
+for _, addresses in ipairs({ { "192.168.1.1" }, { "1.1.1.1", "127.0.0.1" }, { "169.254.169.254" } }) do
+    backend, calls = fixture(profile_json, { host = "profiles.example.test", addresses = addresses })
+    params, err = backend.routing_params(json.object({ incy = incy }), "incy", WORKSPACE)
+    assert(not params and err == "routing_download" and calls.curl == 0)
+end
+for _, options in ipairs({ { status = "302" }, { exit_code = 28 }, { status = "500" } }) do
+    options.host = "profiles.example.test"
+    backend = fixture(profile_json, options)
+    params, err = backend.routing_params(json.object({ incy = incy }), "incy", WORKSPACE)
+    assert(not params and err == "routing_download")
+end
+backend = fixture(string.rep("x", core.profile_limit + 1), { host = "profiles.example.test" })
+params, err = backend.routing_params(json.object({ incy = incy }), "incy", WORKSPACE)
+assert(not params and err == "routing_download")
+assert(not backend.valid_offers(json.object({ happ = happ, extra = "ignored" })))
+assert(not backend.routing_params(json.object({ happ = happ }), "incy", WORKSPACE))
 
 print("subscription runtime tests passed")

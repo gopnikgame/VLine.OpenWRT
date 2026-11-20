@@ -183,6 +183,7 @@ def app_metadata(data):
                     expected_keep = (
                         b"/etc/vpn-routing-hwid\n"
                         b"/etc/vpn-routing/policy.json\n"
+                        b"/etc/vpn-routing/routing-update.json\n"
                         b"/etc/vpn-routing/geodata/\n"
                     )
                     if keep.read(len(expected_keep) + 1) != expected_keep:

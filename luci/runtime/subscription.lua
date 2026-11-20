@@ -147,6 +147,65 @@ local function parse_reserve(name, line, core)
     return { name = name, link = link }
 end
 
+local function routing_offer(line, core)
+    local payload = line:match("^happ://routing/onadd/(.+)$") or line:match("^happ://routing/add/(.+)$")
+    if payload then
+        if #payload > 4 * math.ceil(core.profile_limit / 3) then return nil end
+        local ok = pcall(core.decode_base64, payload, core.profile_limit)
+        if ok then return "happ", "happ://routing/onadd/" .. payload end
+        return nil
+    end
+    local url = line:match("^incy://autorouting/onadd/(.+)$") or line:match("^incy://autorouting/add/(.+)$")
+        or line:match("^://autorouting/onadd/(.+)$") or line:match("^://autorouting/add/(.+)$")
+    if url and #url <= 512 then
+        -- Match the compiler's exact-URL policy, including its plain-path restriction.
+        local host, path = url:match("^https://([a-z0-9.%-]+)(/[A-Za-z0-9._~/%-]+)$")
+        if not host or not dns_name(host, core) then return nil end
+        for segment in path:gmatch("[^/]+") do
+            if segment == "." or segment == ".." then return nil end
+        end
+        return "incy", "incy://autorouting/onadd/" .. url
+    end
+end
+
+local function add_offer(offers, line, core)
+    local source, value = routing_offer(line, core)
+    if not source then return nil, "routing_invalid" end
+    if offers[source] and offers[source] ~= value then return nil, "routing_ambiguous" end
+    offers[source] = value
+    return true
+end
+
+local function routing_headers(input, core)
+    if type(input) ~= "string" or #input > core.headers_limit then return nil, "routing_invalid" end
+    input = input:gsub("\r\n", "\n")
+    if input:find("[%z\1-\8\11-\31\127]") then return nil, "routing_invalid" end
+    local offers, status, final, closed = {}, nil, false, true
+    for line in input:gmatch("([^\n]*)\n") do
+        if closed then
+            local version, code, reason = line:match("^HTTP/([0-9.]+) (%d%d%d)(.*)$")
+            if final or not ({ ["1.0"] = true, ["1.1"] = true, ["2"] = true, ["3"] = true })[version]
+                or (code ~= "200" and code:sub(1, 1) ~= "1")
+                or (reason ~= "" and reason:sub(1, 1) ~= " ") then return nil, "routing_invalid" end
+            status, closed, offers = code, false, {}
+        elseif line == "" then
+            closed, final = true, status == "200"
+        else
+            local name, value = line:match("^([!#$%%&'*+.^_\96|~0-9A-Za-z%-]+):[ \t]*(.-)[ \t]*$")
+            if not name then return nil, "routing_invalid" end
+            if status == "200" and (name:lower() == "routing" or name:lower() == "autorouting") then
+                local expected = name:lower() == "routing" and "happ" or "incy"
+                local source = routing_offer(value, core)
+                if source ~= expected then return nil, "routing_invalid" end
+                local ok, err = add_offer(offers, value, core)
+                if not ok then return nil, err end
+            end
+        end
+    end
+    if not final or not closed or input:sub(-2) ~= "\n\n" then return nil, "routing_invalid" end
+    return offers
+end
+
 local function parse_subscription(body, core)
     body = trim((body:gsub("^\239\187\191", "")))
     if not body:find("://", 1, true) then
@@ -160,16 +219,19 @@ local function parse_subscription(body, core)
     end
     -- JSON and HTML remain unsupported even if their text contains a share URI.
     if body:match("^[<%[{]") then return nil end
-    local servers, seen = {}, {}
+    local servers, seen, offers = {}, {}, {}
     for raw_line in body:gmatch("[^\r\n]+") do
-        local link, fragment, credential, hysteria = parse_link(trim(raw_line), core)
-        if link and not seen[link] then
+        local line = trim(raw_line)
+        local link, fragment, credential, hysteria = parse_link(line, core)
+        if line:match("^happ://routing/") or line:match("^incy://autorouting/") or line:match("^://autorouting/") then
+            local ok, err = add_offer(offers, line, core)
+            if not ok then return nil, err end
+        elseif link and not seen[link] and #servers < SERVER_LIMIT then
             seen[link] = true
             servers[#servers + 1] = { name = display_name(fragment, credential, #servers + 1, hysteria), link = link }
-            if #servers == SERVER_LIMIT then break end
         end
     end
-    if #servers > 0 then return servers end
+    if #servers > 0 then return servers, nil, offers end
 end
 
 local function pin_addresses(platform, core, host)
@@ -203,7 +265,7 @@ return function(json, platform, core, device)
         local hwid = device.get()
         if not hwid then return nil, "hwid_unavailable" end
 
-        local servers, outcome = platform.with_workspace(function(dir)
+        local response_data, outcome = platform.with_workspace(function(dir)
             local config = dir .. "/curl.conf"
             local body_file, status_file = dir .. "/body", dir .. "/status"
             -- URI_CHARS excludes config quote escapes and all line separators.
@@ -219,6 +281,8 @@ return function(json, platform, core, device)
                 "--output", body_file, "--write-out", "%{http_code}\t%header{x-hwid-max-devices-reached}"
                     .. "\t%header{x-hwid-limit}\t%header{x-hwid-not-supported}", "--config", config,
             }
+            local headers_file = dir .. "/headers"
+            argv[#argv + 1], argv[#argv + 2] = "--dump-header", headers_file
             local exit_code = platform.run(argv, { timeout = 11, stdout = status_file })
             if exit_code ~= 0 then return nil end
             local response = platform.read(status_file, 256) or ""
@@ -230,19 +294,71 @@ return function(json, platform, core, device)
             if status ~= "200" then return nil end
             local body = platform.read(body_file, BODY_LIMIT)
             if not body then return nil end
-            local parsed = parse_subscription(body, core)
-            if not parsed then return nil, "unsupported_subscription" end
-            return parsed
+            local parsed, parse_error, offers = parse_subscription(body, core)
+            if not parsed then return nil, parse_error or "unsupported_subscription" end
+            local from_headers, header_error = routing_headers(platform.read(headers_file, core.headers_limit), core)
+            if not from_headers then return nil, header_error end
+            for _, offer in pairs(from_headers) do
+                local ok, err = add_offer(offers, offer, core)
+                if not ok then return nil, err end
+            end
+            return { servers = parsed, offers = json.object(offers) }
         end)
-        if servers then return servers end
-        if outcome == "unsupported_subscription" or outcome == "hwid_limit_reached" or outcome == "hwid_rejected" then
+        if response_data then return response_data.servers, nil, response_data.offers end
+        if outcome == "unsupported_subscription" or outcome == "hwid_limit_reached" or outcome == "hwid_rejected"
+            or outcome == "routing_invalid" or outcome == "routing_ambiguous" then
             return nil, outcome
         end
         return nil, "subscription_unavailable"
     end
 
+    local function valid_offers(offers)
+        if offers == nil then return true end
+        if not json.is_object(offers) then return false end
+        for source, offer in pairs(offers) do
+            if type(offer) ~= "string" then return false end
+            local format, normalized = routing_offer(offer, core)
+            if format ~= source or normalized ~= offer then return false end
+        end
+        return true
+    end
+
+    local function routing_params(offers, source, dir)
+        if not valid_offers(offers) or not offers or not offers[source] then return nil, "routing_missing" end
+        local policy = json.object({ inboundTag = "vpn-routing-tproxy", routeOrder = "block-proxy-direct" })
+        local params = { source = source, policy = "", profile = "" }
+        if source == "happ" then
+            params.headers = "routing: " .. offers.happ
+        elseif source == "incy" then
+            local url = offers.incy:match("^incy://autorouting/onadd/(.+)$")
+            local host = subscription_url(url, core)
+            local pins = host and pin_addresses(platform, core, host)
+            if not pins then return nil, "routing_download" end
+            local config, body, status = dir .. "/routing-curl.conf", dir .. "/routing-profile", dir .. "/routing-status"
+            if not platform.write(config, 'url = "' .. url .. '"\n') then return nil, "storage_error" end
+            -- Routing sources receive no subscription credentials or device identifiers.
+            local code = platform.run({ "/usr/bin/curl", "-q", "--silent", "--globoff", "--path-as-is", "--ipv4",
+                "--proto", "=https", "--noproxy", "*", "--proxy", "", "--max-redirs", "0",
+                "--resolve", pins, "--connect-timeout", "4", "--max-time", "10",
+                "--max-filesize", tostring(core.profile_limit), "--output", body,
+                "--write-out", "%{http_code}", "--config", config,
+            }, { timeout = 11, stdout = status })
+            if code ~= 0 or platform.read(status, 3) ~= "200" then return nil, "routing_download" end
+            params.profile = platform.read(body, core.profile_limit)
+            if not params.profile or params.profile == "" then return nil, "routing_download" end
+            params.headers = "autorouting: " .. offers.incy
+            policy.incySource = json.object({ url = url })
+        else
+            return nil, "routing_invalid"
+        end
+        params.policy = json.encode(policy)
+        return params
+    end
+
     return {
         fetch = fetch, permitted = permitted,
+        valid_offers = valid_offers, routing_params = routing_params,
+        valid_url = function(url) return subscription_url(url, core) ~= nil end,
         parse_reserve = function(name, line) return parse_reserve(name, line, core) end,
         hysteria_auth = function(link) return hysteria_auth(link, core) end,
     }
