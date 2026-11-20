@@ -1,0 +1,12 @@
+#!/bin/sh
+
+root=${IPKG_INSTROOT:-}
+for name in vpn-routing-guard vpn-routing-restore vpn-routing-subscription; do
+    script="$root/etc/init.d/$name"
+    /bin/sh "$root/etc/rc.common" "$script" enable &&
+        /bin/sh "$root/etc/rc.common" "$script" enabled || exit 1
+done
+
+if [ -z "$root" ]; then
+    /etc/init.d/vpn-routing-subscription start || exit 1
+fi

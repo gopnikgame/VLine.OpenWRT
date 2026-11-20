@@ -1,0 +1,9 @@
+#!/bin/sh /etc/rc.common
+
+# Run synchronously before firewall4 (19) and netifd (20).
+START=18
+
+start() {
+    [ -f /etc/vpn-routing/connection.json ] || return 0
+    /usr/bin/lua /usr/lib/vpn-routing/restore.lua guard
+}

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>VPN Routing — демо интерфейса OpenWrt</title>
+<style>
+:root{color-scheme:dark;background:#080d17;color:#f8fafc;font-family:Inter,system-ui,sans-serif}
+body{margin:0;padding:clamp(8px,3vw,28px)}
+.demo-note{max-width:72rem;margin:0 auto 12px;padding:8px 12px;border:1px solid #293a54;border-radius:10px;display:flex;gap:8px 16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.demo-note p{margin:0;color:#a9b6c9;font-size:.875rem;line-height:1.4}
+.demo-note strong{color:#f8fafc;font-weight:650}
+.demo-note button{min-height:44px;background:#172338;color:#f8fafc;border:1px solid #586e8d;border-radius:8px;padding:6px 12px;font:inherit;font-size:.875rem;cursor:pointer}
+.demo-note button:focus-visible{outline:2px solid #35e6f2;outline-offset:2px}
+@@VPN_ROUTING_STYLE@@
+</style>
+</head>
+<body>
+<aside class="demo-note" aria-label="Режим демонстрации">
+<p><strong>Локальное демо.</strong> Подключение, настройки и результаты HTTP HEAD имитируются.</p>
+<button type="button" id="demo-fill">Вставить тестовую ссылку</button>
+</aside>
+<main id="view"></main>
+<script>
+'use strict';
+const settingsFixture = {"GlobalProxy": "true", "DomainStrategy": "IPIfNonMatch", "RouteOrder": "block-proxy-direct", "DirectSites": ["domain:demo.test"], "DirectIp": ["192.0.2.8/32"], "ProxySites": ["full:video.demo.test"], "ProxyIp": [], "BlockSites": ["full:ads.demo.test"], "BlockIp": []};
+const settingsCandidate = "{\n  \"routing\": {\n    \"domainStrategy\": \"IPIfNonMatch\",\n    \"rules\": [\n      {\n        \"domain\": [\n          \"full:ads.demo.test\"\n        ],\n        \"inboundTag\": [\n          \"lab-tproxy\"\n        ],\n        \"outboundTag\": \"block\",\n        \"ruleTag\": \"vpn-routing-block-domain\",\n        \"type\": \"field\"\n      },\n      {\n        \"domain\": [\n          \"full:video.demo.test\"\n        ],\n        \"inboundTag\": [\n          \"lab-tproxy\"\n        ],\n        \"outboundTag\": \"proxy\",\n        \"ruleTag\": \"vpn-routing-proxy-domain\",\n        \"type\": \"field\"\n      },\n      {\n        \"domain\": [\n          \"domain:demo.test\"\n        ],\n        \"inboundTag\": [\n          \"lab-tproxy\"\n        ],\n        \"outboundTag\": \"direct\",\n        \"ruleTag\": \"vpn-routing-direct-domain\",\n        \"type\": \"field\"\n      },\n      {\n        \"inboundTag\": [\n          \"lab-tproxy\"\n        ],\n        \"ip\": [\n          \"192.0.2.8/32\"\n        ],\n        \"outboundTag\": \"direct\",\n        \"ruleTag\": \"vpn-routing-direct-ip\",\n        \"type\": \"field\"\n      }\n    ]\n  }\n}\n";
+const demoUrl = 'https://subscription.example.invalid/vpn-routing-demo';
+const profileUrl = 'https://profiles.example.invalid/routing.json';
+const demoServers = [
+  {id:'lab-a',name:'Тестовый сервер A'},
+  {id:'lab-b',name:'Тестовый сервер B'},
+  {id:'lab-c',name:'Тестовый сервер C'},
+];
+const samples = {
+  'lab-a': {result:'response',httpCode:204,elapsedMs:148},
+  'lab-b': {result:'response',httpCode:503,elapsedMs:241},
+  'lab-c': {result:'timeout'},
+};
+const jsonResponse = (value, status=200) => new Response(JSON.stringify(value), {status,headers:{'Content-Type':'application/json'}});
+let demoList = null;
+let snapshotVersion = 0;
+let connected = null;
+let capture = {mode:'all',interface:'br-lan'};
+let routing = null;
+const networks = [
+  {device:'br-lan',label:'Домашняя сеть',clients:[{address:'192.168.1.50',name:'Ноутбук'},{address:'192.168.1.51',name:'Телефон'}]},
+  {device:'br-guest',label:'Гостевая сеть',clients:[{address:'192.168.8.40',name:'Планшет'}]},
+];
+function connection() {
+  const hasSubscription = demoList !== null;
+  return connected ? {state:'connected',serverId:connected.id,serverName:connected.name,hasSubscription}
+    : {state:'disconnected',hasSubscription,canConnect:capture !== null,...(capture ? {} : {runtimeReason:'capture_not_configured'})};
+}
+function settings() {
+  return jsonResponse({ok:true,editable:!connected,networks,capture,routing,hwid:'00000000000000000000000000000001'});
+}
+globalThis.fetch = async (url, options) => {
+  if (options?.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const action = url.split('/').at(-1);
+  const input = options?.body;
+  if (options?.method !== 'POST' || !(input instanceof URLSearchParams) || input.get('token') !== 'demo')
+    return jsonResponse({ok:false,error:'invalid_request'},400);
+  if (action === 'status') {
+    const subscription = demoList ? {url:demoUrl,...demoList} : undefined;
+    return jsonResponse({ok:true,...connection(),subscription});
+  }
+  if (action === 'settings')
+    return settings();
+  if (action === 'save_capture' || action === 'save_routing') {
+    if (connected)
+      return jsonResponse({ok:false,error:'settings_busy'},409);
+    if (action === 'save_capture') {
+      const device = input.get('interface');
+      const prefix = device === 'br-lan' ? '192.168.1.' : device === 'br-guest' ? '192.168.8.' : '';
+      const mode = input.get('mode') || 'selected';
+      if (prefix && mode === 'all' && !input.has('sources')) {
+        capture = {mode,interface:device};
+        return settings();
+      }
+      const sources = (input.get('sources') || '').trim().split(/\s+/);
+      if (!prefix || mode !== 'selected' || sources.length > 32 || !sources.every(address => address.startsWith(prefix) &&
+          /^[0-9]{1,3}$/.test(address.slice(prefix.length)) && Number(address.slice(prefix.length)) > 1 &&
+          Number(address.slice(prefix.length)) < 255))
+        return jsonResponse({ok:false,error:'capture_policy'},422);
+      capture = {mode,interface:device,sources};
+      return settings();
+    }
+    if (input.get('source') === 'none') {
+      routing = null;
+      return settings();
+    }
+  }
+  if (action === 'subscription') {
+    if (input.get('url') !== demoUrl)
+      return jsonResponse({ok:false,error:'invalid_request'},400);
+    demoList = {snapshot:'demo-list-' + ++snapshotVersion,servers:demoServers};
+    return jsonResponse({ok:true,...demoList});
+  }
+  if (action === 'remove_subscription') {
+    if (connected)
+      return jsonResponse({ok:false,error:'subscription_busy'},409);
+    demoList = null;
+    return jsonResponse({ok:true,...connection()});
+  }
+  if (action === 'connect' || action === 'probe' || action === 'disconnect') {
+    await new Promise(resolve => setTimeout(resolve, 240));
+    if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    if (action === 'disconnect') {
+      connected = null;
+      return jsonResponse({ok:true,...connection()});
+    }
+    const server = demoList && input.get('snapshot') === demoList.snapshot &&
+      demoServers.find(item => item.id === input.get('server'));
+    if (!server)
+      return jsonResponse({ok:false,error:'stale_snapshot'},409);
+    if (action === 'probe')
+      return jsonResponse({ok:true,method:'HEAD',serverId:server.id,...samples[server.id]});
+    if (!capture)
+      return jsonResponse({ok:false,error:'capture_not_configured'},503);
+    if (server.id === 'lab-c')
+      return jsonResponse({ok:false,error:'apply_failed'},503);
+    connected = server;
+    return jsonResponse({ok:true,...connection()});
+  }
+  if (action === 'preview' || action === 'save_routing') {
+    try {
+      const source = input.get('source'), headers = input.get('headers'), policy = JSON.parse(input.get('policy'));
+      const profile = source === 'happ'
+        ? JSON.parse(atob(headers.replace(/^routing: happ:\/\/routing\/onadd\//, '')))
+        : JSON.parse(input.get('profile'));
+      const validPolicy = ['happ','incy'].includes(source) && /^[a-zA-Z0-9_.-]{1,64}$/.test(policy.inboundTag) &&
+        policy.routeOrder === 'block-proxy-direct' &&
+        Object.keys(policy).length === (source === 'happ' ? 2 : 3) &&
+        (source !== 'incy' || (policy.incySource?.url === profileUrl && headers === 'autorouting: incy://autorouting/onadd/' + profileUrl));
+      if (validPolicy && JSON.stringify(profile) === JSON.stringify(settingsFixture)) {
+        if (action === 'save_routing') {
+          routing = {source};
+          return settings();
+        }
+        return jsonResponse({ok:true,candidate:settingsCandidate.replaceAll('"lab-tproxy"',JSON.stringify(policy.inboundTag))});
+      }
+    } catch { }
+    if (action === 'save_routing')
+      return jsonResponse({ok:false,error:'routing_invalid'},422);
+    return jsonResponse({ok:false,error:'rejected',detail:'Demo only. Use the built-in profile example.'});
+  }
+  return jsonResponse({ok:false,error:'invalid_request'},404);
+};
+const E = (tag, attrs = {}, children = []) => {
+  const node = document.createElement(tag);
+  Object.entries(attrs).forEach(([name,value]) => node.setAttribute(name,value));
+  for (const child of Array.isArray(children) ? children : [children])
+    if (child != null) node.append(child);
+  return node;
+};
+const L = {url:(...parts) => '/cgi-bin/luci/' + parts.join('/'),resource:() => 'data:text/css,',env:{token:'demo'}};
+const page = (function(view,L,E){
+@@VPN_ROUTING_VIEW@@
+})({extend: x => x}, L, E);
+document.getElementById('view').appendChild(page.render());
+document.getElementById('demo-fill').addEventListener('click', () => {
+  const input = document.getElementById('vpn-routing-subscription-url');
+  if (input.readOnly) return;
+  document.getElementById('vpn-routing-tab-connection').click();
+  if (input.value !== demoUrl) {
+    input.value = demoUrl;
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+  }
+  input.focus();
+});
+</script>
+</body>
+</html>

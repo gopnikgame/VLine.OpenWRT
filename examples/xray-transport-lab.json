@@ -1,0 +1,62 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "VPN_ROUTING_HYSTERIA2_TEST",
+      "listen": "127.0.0.1",
+      "port": 8443,
+      "protocol": "hysteria",
+      "settings": {
+        "version": 2,
+        "users": []
+      },
+      "streamSettings": {
+        "network": "hysteria",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h3"],
+          "certificates": [{
+            "certificateFile": "/path/to/lab-fullchain.pem",
+            "keyFile": "/path/to/lab-key.pem"
+          }]
+        },
+        "hysteriaSettings": {
+          "version": 2
+        }
+      }
+    },
+    {
+      "tag": "VPN_ROUTING_XHTTP_TLS_TEST",
+      "listen": "127.0.0.1",
+      "port": 9443,
+      "protocol": "vless",
+      "settings": {
+        "decryption": "none",
+        "clients": []
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2"],
+          "minVersion": "1.3",
+          "certificates": [{
+            "certificateFile": "/path/to/lab-fullchain.pem",
+            "keyFile": "/path/to/lab-key.pem"
+          }]
+        },
+        "xhttpSettings": {
+          "host": "edge.example.net",
+          "path": "/vpn-routing-xhttp",
+          "mode": "stream-up"
+        }
+      }
+    }
+  ],
+  "outbounds": [{
+    "tag": "direct",
+    "protocol": "freedom"
+  }]
+}

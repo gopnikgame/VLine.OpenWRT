@@ -1,0 +1,7 @@
+{
+  "inboundTag": "lab-tproxy",
+  "routeOrder": "block-proxy-direct",
+  "incySource": {
+    "url": "https://routing.example.invalid/profiles/lab.json"
+  }
+}

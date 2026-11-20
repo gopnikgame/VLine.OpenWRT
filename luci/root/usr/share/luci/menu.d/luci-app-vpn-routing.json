@@ -1,0 +1,130 @@
+{
+  "admin/network/vpn-routing": {
+    "title": "VPN-маршрутизация",
+    "order": 95,
+    "action": {
+      "type": "view",
+      "path": "vpn-routing/preview"
+    }
+  },
+  "admin/network/vpn-routing/preview": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "preview",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/subscription": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "subscription",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/remove_subscription": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "remove_subscription",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/save_reserve": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "save_reserve",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/remove_reserve": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "remove_reserve",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/connect": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "connect",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/disconnect": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "disconnect",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/status": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "status",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/probe": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "probe",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/settings": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "settings",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/dns_settings": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "dns_settings",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/check_dns": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "check_dns",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/apply_dns": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "apply_dns",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/save_capture": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "save_capture",
+      "post": true
+    }
+  },
+  "admin/network/vpn-routing/save_routing": {
+    "action": {
+      "type": "call",
+      "module": "luci.vpn_routing",
+      "function": "save_routing",
+      "post": true
+    }
+  }
+}

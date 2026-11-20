@@ -1,0 +1,610 @@
+.vpn-routing-preview {
+	--vpn-routing-bg: #080d17;
+	--vpn-routing-surface: #101827;
+	--vpn-routing-elevated: #172338;
+	--vpn-routing-strong: #1c2a42;
+	--vpn-routing-flow: #35e6f2;
+	--vpn-routing-text: #f8fafc;
+	--vpn-routing-muted: #a9b6c9;
+	--vpn-routing-ink: #041015;
+	--vpn-routing-border: #293a54;
+	--vpn-routing-control-border: #586e8d;
+	--vpn-routing-success: #34d47a;
+	--vpn-routing-warning: #f7b955;
+	--vpn-routing-danger: #ff6b7a;
+	--vpn-routing-radius-sm: 10px;
+	--vpn-routing-radius-md: 16px;
+	--vpn-routing-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+	box-sizing: border-box;
+	max-width: 72rem;
+	padding: clamp(12px, 2.3vw, 24px);
+	padding-inline-start: max(clamp(12px, 2.3vw, 24px), env(safe-area-inset-left, 0px));
+	padding-inline-end: max(clamp(12px, 2.3vw, 24px), env(safe-area-inset-right, 0px));
+	margin-inline: auto;
+	border: 1px solid var(--vpn-routing-border);
+	border-radius: var(--vpn-routing-radius-md);
+	background: var(--vpn-routing-bg);
+	color: var(--vpn-routing-text);
+	color-scheme: dark;
+	font: 400 16px/1.45 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.vpn-routing-preview *,
+.vpn-routing-preview *::before,
+.vpn-routing-preview *::after {
+	box-sizing: border-box;
+}
+
+.vpn-routing-preview [hidden] {
+	display: none !important;
+}
+
+.vpn-routing-preview h1,
+.vpn-routing-preview h2,
+.vpn-routing-preview h3,
+.vpn-routing-preview p,
+.vpn-routing-preview dl,
+.vpn-routing-preview dd {
+	margin: 0;
+}
+
+.vpn-routing-preview h1,
+.vpn-routing-preview h2,
+.vpn-routing-preview h3 {
+	color: var(--vpn-routing-text);
+}
+
+.vpn-routing-preview h1 {
+	font-size: clamp(1.32rem, 2.8vw, 1.85rem);
+	font-weight: 680;
+	line-height: 1.18;
+}
+
+.vpn-routing-preview h2 {
+	font-size: 1.12rem;
+	font-weight: 650;
+}
+
+.vpn-routing-preview .vpn-routing-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px 24px;
+	margin-block-end: 20px;
+}
+
+.vpn-routing-preview .vpn-routing-heading {
+	display: grid;
+	min-width: 0;
+	gap: 5px;
+}
+
+.vpn-routing-preview .vpn-routing-source-link {
+	width: fit-content;
+	color: var(--vpn-routing-flow);
+	font-size: 0.86rem;
+	text-decoration: underline;
+}
+
+.vpn-routing-preview .vpn-routing-scope {
+	padding: 5px 10px;
+	border: 1px solid var(--vpn-routing-border);
+	border-radius: 999px;
+	color: var(--vpn-routing-muted);
+	background: var(--vpn-routing-surface);
+	font-size: 0.78rem;
+}
+
+.vpn-routing-preview .vpn-routing-tabs {
+	display: flex;
+	gap: 6px;
+	margin-block-end: 12px;
+	border-block-end: 1px solid var(--vpn-routing-border);
+}
+
+.vpn-routing-preview .vpn-routing-tab {
+	min-height: 44px;
+	min-width: 44px;
+	padding: 8px clamp(10px, 2.2vw, 16px);
+	border: 1px solid transparent;
+	border-block-end: 2px solid transparent;
+	border-radius: var(--vpn-routing-radius-sm) var(--vpn-routing-radius-sm) 0 0;
+	background: transparent;
+	color: var(--vpn-routing-muted);
+	font: inherit;
+	font-size: 0.95rem;
+	font-weight: 650;
+	cursor: pointer;
+}
+
+.vpn-routing-preview .vpn-routing-tab:hover {
+	background: var(--vpn-routing-elevated);
+	color: var(--vpn-routing-text);
+}
+
+.vpn-routing-preview .vpn-routing-tab[aria-selected="true"] {
+	border-block-end-color: var(--vpn-routing-flow);
+	background: var(--vpn-routing-surface);
+	color: var(--vpn-routing-flow);
+}
+
+.vpn-routing-preview .vpn-routing-workbench {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+	gap: 1px;
+	overflow: hidden;
+	border: 1px solid var(--vpn-routing-border);
+	border-radius: var(--vpn-routing-radius-md);
+	background: var(--vpn-routing-border);
+}
+
+.vpn-routing-preview .vpn-routing-settings {
+	display: grid;
+	gap: 12px;
+}
+
+.vpn-routing-preview .vpn-routing-devices {
+	border: 1px solid var(--vpn-routing-border);
+	border-radius: var(--vpn-routing-radius-md);
+}
+
+.vpn-routing-preview .vpn-routing-device-fields {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+	gap: 14px;
+}
+
+.vpn-routing-preview .vpn-routing-device-picker {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+}
+
+.vpn-routing-preview .vpn-routing-pane {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: 14px;
+	margin: 0;
+	padding: clamp(12px, 2vw, 24px);
+	background: var(--vpn-routing-surface);
+}
+
+.vpn-routing-preview .vpn-routing-source {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.vpn-routing-preview .vpn-routing-label {
+	display: block;
+	padding: 0;
+	color: var(--vpn-routing-text);
+	font-size: 0.92rem;
+	font-weight: 650;
+}
+
+.vpn-routing-preview legend.vpn-routing-label {
+	margin-block-end: 6px;
+}
+
+.vpn-routing-preview .vpn-routing-source-option {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	gap: 8px;
+	padding: 7px 8px;
+	border: 1px solid var(--vpn-routing-control-border);
+	border-radius: var(--vpn-routing-radius-sm);
+	background: var(--vpn-routing-elevated);
+	color: var(--vpn-routing-text);
+	cursor: pointer;
+}
+
+.vpn-routing-preview .vpn-routing-source-option:has(input:checked) {
+	border-color: var(--vpn-routing-flow);
+	background: var(--vpn-routing-strong);
+}
+
+.vpn-routing-preview .vpn-routing-source-option input {
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	accent-color: var(--vpn-routing-flow);
+}
+
+.vpn-routing-preview .vpn-routing-form-field,
+.vpn-routing-preview .vpn-routing-connection-form,
+.vpn-routing-preview .vpn-routing-incy-fields,
+.vpn-routing-preview .vpn-routing-advanced-body {
+	display: grid;
+	min-width: 0;
+	gap: 6px;
+}
+
+.vpn-routing-preview .vpn-routing-incy-fields,
+.vpn-routing-preview .vpn-routing-advanced-body {
+	gap: 14px;
+}
+
+.vpn-routing-preview .vpn-routing-field {
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	min-height: 44px;
+	margin: 0;
+	padding: 9px 10px;
+	border: 1px solid var(--vpn-routing-control-border);
+	border-radius: var(--vpn-routing-radius-sm);
+	background: var(--vpn-routing-bg);
+	color: var(--vpn-routing-text);
+	font: 400 16px/1.35 var(--vpn-routing-font-mono);
+	box-shadow: none;
+}
+
+.vpn-routing-preview textarea.vpn-routing-field {
+	resize: vertical;
+}
+
+.vpn-routing-preview textarea.vpn-routing-subscription-url {
+	field-sizing: content;
+	max-height: 10rem;
+	overflow-wrap: anywhere;
+}
+
+.vpn-routing-preview .vpn-routing-server-select {
+	/* LuCI Bootstrap mobile sets a fixed height on native selects. */
+	height: auto;
+	font-family: inherit;
+	text-overflow: ellipsis;
+}
+
+.vpn-routing-preview .vpn-routing-server-controls {
+	display: grid;
+	min-width: 0;
+	gap: 10px;
+}
+
+.vpn-routing-preview .vpn-routing-server-list {
+	display: grid;
+	grid-auto-rows: max-content;
+	gap: 6px;
+	max-height: 28rem;
+	max-height: min(52svh, 28rem);
+	padding: 2px;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+.vpn-routing-preview .vpn-routing-server-row {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	min-height: 48px;
+	padding: 8px 9px;
+	border: 1px solid var(--vpn-routing-border);
+	border-radius: var(--vpn-routing-radius-sm);
+	background: var(--vpn-routing-elevated);
+	color: var(--vpn-routing-text);
+	cursor: pointer;
+}
+
+.vpn-routing-preview .vpn-routing-server-row[data-selected="true"],
+.vpn-routing-preview .vpn-routing-server-row:focus-within {
+	border-color: var(--vpn-routing-flow);
+	background: var(--vpn-routing-strong);
+}
+
+.vpn-routing-preview .vpn-routing-server-row input {
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	accent-color: var(--vpn-routing-flow);
+}
+
+.vpn-routing-preview .vpn-routing-server-identity {
+	display: grid;
+	min-width: 0;
+	gap: 2px;
+}
+
+.vpn-routing-preview .vpn-routing-server-name {
+	font-size: 0.9rem;
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+.vpn-routing-preview .vpn-routing-server-source,
+.vpn-routing-preview .vpn-routing-server-active,
+.vpn-routing-preview .vpn-routing-server-result {
+	font-size: 0.76rem;
+	font-weight: 650;
+}
+
+.vpn-routing-preview .vpn-routing-server-source {
+	color: var(--vpn-routing-muted);
+}
+
+.vpn-routing-preview .vpn-routing-server-active,
+.vpn-routing-preview .vpn-routing-server-result[data-state="busy"] {
+	color: var(--vpn-routing-flow);
+}
+
+.vpn-routing-preview .vpn-routing-server-result {
+	color: var(--vpn-routing-muted);
+	text-align: end;
+}
+
+.vpn-routing-preview .vpn-routing-server-result[data-state="ready"] {
+	color: var(--vpn-routing-success);
+}
+
+.vpn-routing-preview .vpn-routing-server-result[data-state="error"],
+.vpn-routing-preview .vpn-routing-probe-progress[data-state="error"] {
+	color: var(--vpn-routing-danger);
+}
+
+.vpn-routing-preview .vpn-routing-section-heading {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px 12px;
+}
+
+.vpn-routing-preview .vpn-routing-connection-name {
+	color: var(--vpn-routing-text);
+	font-weight: 650;
+	overflow-wrap: anywhere;
+}
+
+.vpn-routing-preview .vpn-routing-field::placeholder {
+	color: var(--vpn-routing-muted);
+	opacity: 0.8;
+}
+
+.vpn-routing-preview .vpn-routing-field[aria-invalid="true"] {
+	border-color: var(--vpn-routing-danger);
+}
+
+.vpn-routing-preview .vpn-routing-hint {
+	color: var(--vpn-routing-muted);
+	font-size: 0.86rem;
+	overflow-wrap: anywhere;
+}
+
+.vpn-routing-preview .vpn-routing-dns-addresses {
+	display: grid;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	color: var(--vpn-routing-muted);
+	font: 400 0.86rem/1.4 var(--vpn-routing-font-mono);
+	overflow-wrap: anywhere;
+}
+
+.vpn-routing-preview .vpn-routing-advanced,
+.vpn-routing-preview .vpn-routing-summary {
+	border: 1px solid var(--vpn-routing-border);
+	border-radius: var(--vpn-routing-radius-sm);
+}
+
+.vpn-routing-preview summary {
+	min-height: 44px;
+	padding: 11px 10px;
+	color: var(--vpn-routing-text);
+	cursor: pointer;
+	font-size: 0.89rem;
+	font-weight: 600;
+}
+
+.vpn-routing-preview summary:hover,
+.vpn-routing-preview .vpn-routing-source-option:hover {
+	background: var(--vpn-routing-strong);
+}
+
+.vpn-routing-preview .vpn-routing-advanced-body {
+	padding: 12px;
+	border-block-start: 1px solid var(--vpn-routing-border);
+}
+
+.vpn-routing-preview .vpn-routing-rules .vpn-routing-advanced-body {
+	gap: 0;
+	max-block-size: min(26rem, 65vh);
+	overflow: auto;
+}
+
+.vpn-routing-preview .vpn-routing-rules .vpn-routing-advanced-body:focus-visible {
+	outline: 2px solid var(--vpn-routing-flow);
+	outline-offset: -2px;
+}
+
+.vpn-routing-preview .vpn-routing-rules .vpn-routing-route-group:last-child {
+	padding-block-end: 0;
+	border-block-end: 0;
+}
+
+.vpn-routing-preview .vpn-routing-rules ul {
+	margin: 2px 0 6px;
+	padding-inline-start: 20px;
+}
+
+.vpn-routing-preview .vpn-routing-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.vpn-routing-preview .vpn-routing-button {
+	min-width: 44px;
+	min-height: 44px;
+	max-width: 100%;
+	margin: 0;
+	padding: 9px 13px;
+	border: 1px solid var(--vpn-routing-control-border);
+	border-radius: var(--vpn-routing-radius-sm);
+	background: var(--vpn-routing-elevated);
+	color: var(--vpn-routing-text);
+	font-family: inherit;
+	font-size: 0.9rem;
+	font-weight: 650;
+	line-height: 1.3;
+	white-space: normal;
+	cursor: pointer;
+}
+
+.vpn-routing-preview .vpn-routing-primary {
+	border-color: var(--vpn-routing-flow);
+	background: var(--vpn-routing-flow);
+	color: var(--vpn-routing-ink);
+}
+
+.vpn-routing-preview .vpn-routing-button:not(:disabled):not(.vpn-routing-primary):hover {
+	background: var(--vpn-routing-strong);
+}
+
+.vpn-routing-preview .vpn-routing-primary:not(:disabled):hover {
+	background: #8bf2f8;
+}
+
+.vpn-routing-preview .vpn-routing-button:not(:disabled):active {
+	filter: brightness(0.9);
+}
+
+.vpn-routing-preview .vpn-routing-button:disabled {
+	border-color: var(--vpn-routing-border);
+	background: var(--vpn-routing-surface);
+	color: var(--vpn-routing-muted);
+	cursor: not-allowed;
+}
+
+.vpn-routing-preview :is(input, textarea, select, button, summary):focus-visible,
+.vpn-routing-preview .vpn-routing-source-option:has(:focus-visible) {
+	outline: 2px solid var(--vpn-routing-flow);
+	outline-offset: 2px;
+}
+
+.vpn-routing-preview .vpn-routing-status {
+	padding: 10px 12px;
+	border-inline-start: 3px solid var(--vpn-routing-control-border);
+	border-radius: 0 var(--vpn-routing-radius-sm) var(--vpn-routing-radius-sm) 0;
+	background: var(--vpn-routing-elevated);
+	color: var(--vpn-routing-text);
+	font-size: 0.91rem;
+	overflow-wrap: anywhere;
+}
+
+.vpn-routing-preview .vpn-routing-status[data-state="busy"] {
+	border-inline-start-color: var(--vpn-routing-flow);
+}
+
+.vpn-routing-preview .vpn-routing-status[data-state="ready"] {
+	border-inline-start-color: var(--vpn-routing-success);
+	color: var(--vpn-routing-success);
+}
+
+.vpn-routing-preview .vpn-routing-status[data-state="error"] {
+	border-inline-start-color: var(--vpn-routing-danger);
+	color: var(--vpn-routing-danger);
+}
+
+.vpn-routing-preview .vpn-routing-status[data-state="warning"] {
+	border-inline-start-color: var(--vpn-routing-warning);
+	color: var(--vpn-routing-warning);
+}
+
+.vpn-routing-preview .vpn-routing-result-content {
+	display: grid;
+	gap: 12px;
+	min-width: 0;
+}
+
+.vpn-routing-preview .vpn-routing-result-content:empty {
+	display: none;
+}
+
+.vpn-routing-preview .vpn-routing-result > .vpn-routing-button {
+	align-self: flex-start;
+}
+
+.vpn-routing-preview .vpn-routing-result-rules {
+	border-block-start: 1px solid var(--vpn-routing-border);
+}
+
+.vpn-routing-preview .vpn-routing-route-group {
+	min-width: 0;
+	padding: 11px 0;
+	border-block-end: 1px solid var(--vpn-routing-border);
+}
+
+.vpn-routing-preview .vpn-routing-route-title {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 5px 8px;
+	margin-block-end: 4px;
+	font-size: 0.95rem;
+	font-weight: 650;
+}
+
+.vpn-routing-preview .vpn-routing-route-badge {
+	padding: 2px 7px;
+	border-radius: 999px;
+	background: var(--vpn-routing-elevated);
+	color: var(--vpn-routing-muted);
+	font: 700 0.76rem/1.4 var(--vpn-routing-font-mono);
+}
+
+.vpn-routing-preview [data-route="block"] .vpn-routing-route-badge {
+	color: var(--vpn-routing-danger);
+}
+
+.vpn-routing-preview [data-route="proxy"] .vpn-routing-route-badge {
+	color: var(--vpn-routing-flow);
+}
+
+.vpn-routing-preview .vpn-routing-rule-details ul {
+	max-height: 12rem;
+	margin: 0;
+	padding: 0 12px 6px 24px;
+	overflow: auto;
+}
+
+.vpn-routing-preview :is(.vpn-routing-rule-details, .vpn-routing-rules) code {
+	padding: 0;
+	background: transparent;
+	color: var(--vpn-routing-muted);
+	font: 400 0.84rem/1.5 var(--vpn-routing-font-mono);
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
+.vpn-routing-preview .vpn-routing-diagnostic {
+	padding: 0 10px 10px;
+}
+
+.vpn-routing-preview .vpn-routing-summary {
+	display: grid;
+	gap: 8px;
+	padding: 12px;
+	background: var(--vpn-routing-elevated);
+	font-size: 0.88rem;
+}
+
+.vpn-routing-preview .vpn-routing-summary dt {
+	color: var(--vpn-routing-text);
+	font-weight: 650;
+}
+
+.vpn-routing-preview .vpn-routing-summary dd {
+	color: var(--vpn-routing-muted);
+	overflow-wrap: anywhere;
+}
